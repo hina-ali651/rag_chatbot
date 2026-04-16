@@ -1,37 +1,27 @@
 import os
 from typing import List, Dict, Any
-import chromadb
-from chromadb.utils import embedding_functions
+from pinecone import Pinecone
+from sentence_transformers import SentenceTransformer
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 class RAGEngine:
     def __init__(self, persist_directory: str = "./chroma_db"):
         """
-        Initializes the RAG Engine with ChromaDB and SentenceTransformers.
-        All embedding processing and similarity search is done locally.
+        Initializes the RAG Engine with Pinecone.
+        Embeddings are generated via SentenceTransformer to guarantee 768 dimension sizing to match your Pinecone index natively.
         """
-        # Create a local persistent ChromaDB client saving to the disk
-        self.chroma_client = chromadb.PersistentClient(path=persist_directory)
+        api_key = os.environ.get("PINECONE_API_KEY")
+        index_name = os.environ.get("PINECONE_INDEX_NAME", "rag-pdf-web-idx")
         
-        # We use the free, local sentence-transformers model 'all-MiniLM-L6-v2'.
-        # No API keys required, this runs locally on your machine.
-        self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name="all-MiniLM-L6-v2"
-        )
+        if not api_key:
+            raise ValueError("PINECONE_API_KEY environment variable not set")
+            
+        self.pc = Pinecone(api_key=api_key)
+        self.index = self.pc.Index(index_name)
         
-        # Get or create the vector collection. We configure it to use Cosine Similarity.
-        self.collection = self.chroma_client.get_or_create_collection(
-            name="rag_documents",
-            embedding_function=self.embedding_function,
-            metadata={"hnsw:space": "cosine"}
-        )
+        # Generates exactly 768 length vectors.
+        self.model = SentenceTransformer("all-mpnet-base-v2")
         
-        # NOTE ON CHUNKING SIZES:
-        # The user requested 500 tokens sizes. However, 'all-MiniLM-L6-v2' has a maximum 
-        # embedding length limitation usually maxing out context at 256 tokens.
-        # To ensure we don't severely truncate data and lose context at the embedding step,
-        # we define the chunk size as 1000 characters (~200-250 tokens).
-        # We add an overlap of 100 characters so sentences are less likely to be split awkwardly.
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
             chunk_overlap=100,
@@ -39,70 +29,53 @@ class RAGEngine:
             is_separator_regex=False,
         )
 
-    def add_document(self, text: str, source_name: str) -> int:
-        """
-        Chunks the text, calculates embeddings (locally), and stores them in ChromaDB.
-        Returns the number of chunks successfully added.
-        """
+    def add_document(self, text: str, source_name: str, session_id: str) -> int:
         if not text.strip():
             raise ValueError("Document text is empty.")
 
-        # 1. Split text into manageable overlapping chunks
         chunks = self.text_splitter.split_text(text)
         if not chunks:
             return 0
-
-        # 2. Assign unique IDs to each chunk
-        # Example: document.pdf_chunk_0, document.pdf_chunk_1...
-        ids = [f"{source_name}_chunk_{i}" for i in range(len(chunks))]
+            
+        embeddings = self.model.encode(chunks)
         
-        # 3. Attach metadata indicating where the chunks came from
-        metadatas = [{"source": source_name, "chunk_index": i} for i in range(len(chunks))]
-        
-        # 4. Ingest into vector store. 
-        # The sentence-transformers embedding function runs automatically behind the scenes.
-        self.collection.add(
-            documents=chunks,
-            metadatas=metadatas,
-            ids=ids
-        )
-        
+        vectors = []
+        for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
+            vector_id = f"{session_id}_{source_name}_chunk_{i}"
+            meta = {
+                "source": source_name, 
+                "chunk_index": i, 
+                "session_id": session_id,
+                "text": chunk
+            }
+            vectors.append((vector_id, emb.tolist(), meta))
+            
+        batch_size = 100
+        for i in range(0, len(vectors), batch_size):
+            self.index.upsert(vectors=vectors[i:i + batch_size])
+            
         return len(chunks)
 
-    def query(self, question: str, n_results: int = 5) -> List[Dict[str, Any]]:
-        """
-        Retrieves the top N most relevant chunks for a given question based on cosine similarity.
-        """
-        if self.collection.count() == 0:
-            return []
+    def query(self, question: str, session_id: str, n_results: int = 5) -> List[Dict[str, Any]]:
+        query_vector = self.model.encode([question])[0].tolist()
 
-        # Calculate vector similarity space against the user query text
-        results = self.collection.query(
-            query_texts=[question],
-            n_results=n_results
+        response = self.index.query(
+            vector=query_vector,
+            top_k=n_results,
+            include_metadata=True,
+            filter={"session_id": session_id}
         )
         
         retrieved_chunks = []
         
-        # Re-format ChromaDB's matrix arrays into a clean List of Dicts
-        if results['documents'] and len(results['documents']) > 0:
-            for doc, meta, distance in zip(results['documents'][0], results['metadatas'][0], results['distances'][0]):
-                retrieved_chunks.append({
-                    "text": doc,
-                    "source": meta.get("source", "Unknown"),
-                    "distance": distance
-                })
+        for match in response.matches:
+            retrieved_chunks.append({
+                "text": match.metadata.get("text", ""),
+                "source": match.metadata.get("source", "Unknown"),
+                "distance": match.score
+            })
                 
         return retrieved_chunks
 
     def clear_database(self):
-        """
-        Wipes the entire vector dataset clean.
-        """
-        self.chroma_client.delete_collection(name="rag_documents")
-        # Recreate the empty collection so it's ready for new ingestions
-        self.collection = self.chroma_client.get_or_create_collection(
-            name="rag_documents",
-            embedding_function=self.embedding_function,
-            metadata={"hnsw:space": "cosine"}
-        )
+        self.index.delete(delete_all=True)
