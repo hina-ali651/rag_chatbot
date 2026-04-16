@@ -2,7 +2,6 @@ fastapi==0.109.2
 uvicorn==0.27.1
 google-generativeai==0.8.3
 pinecone==6.0.0
-sentence-transformers==3.4.1
 langchain-text-splitters==0.3.6
 pymongo[srv]==4.11.2
 python-multipart==0.0.9
