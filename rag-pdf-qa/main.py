@@ -1,4 +1,5 @@
 import os
+import tempfile
 import textwrap
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -70,7 +71,7 @@ async def get_session_history(session_id: str):
 @app.post("/api/upload")
 async def upload_document(session_id: str = Form(...), file: UploadFile = File(...)):
     try:
-        temp_path = f"temp_{file.filename}"
+        temp_path = os.path.join(tempfile.gettempdir(), f"temp_{file.filename}")
         with open(temp_path, "wb") as f:
             f.write(await file.read())
             
