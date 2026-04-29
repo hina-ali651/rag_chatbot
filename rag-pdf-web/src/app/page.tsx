@@ -12,6 +12,8 @@ type Message = {
     content: string;
 };
 
+const BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL;
+
 export default function Home() {
     const [messages, setMessages] = useState<Message[]>([
         { role: "assistant", content: "Hello! I am your AI assistant. Upload a document to start a conversation with your data." }
@@ -39,7 +41,7 @@ export default function Home() {
     // Initial load of history
     useEffect(() => {
         if (session?.user?.email && status === "authenticated") {
-            fetch(`http://127.0.0.1:8000/api/sessions/${session.user.email}`)
+            fetch(`${BASE_URL}/api/sessions/${session.user.email}`)
             .then(r => r.json())
             .then(data => {
                 if (data && data.length > 0) {
@@ -55,7 +57,7 @@ export default function Home() {
 
     const createNewSession = async () => {
         if (!session?.user?.email) return;
-        const res = await fetch("http://127.0.0.1:8000/api/sessions", {
+        const res = await fetch(`${BASE_URL}/api/sessions`, {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({user_email: session.user.email, title: "New Chat"})
@@ -68,7 +70,7 @@ export default function Home() {
 
     const loadSession = async (id: string) => {
         setActiveSessionId(id);
-        const res = await fetch(`http://127.0.0.1:8000/api/history/${id}`);
+        const res = await fetch(`${BASE_URL}/api/history/${id}`);
         const data = await res.json();
         if (data && data.length > 0) {
             setMessages(data);
@@ -102,7 +104,7 @@ export default function Home() {
         formData.append("session_id", activeSessionId);
 
         try {
-            const res = await fetch("http://127.0.0.1:8000/api/upload", {
+            const res = await fetch(`${BASE_URL}/api/upload`, {
                 method: "POST",
                 body: formData,
             });
@@ -132,7 +134,7 @@ export default function Home() {
         setIsThinking(true);
 
         try {
-            const res = await fetch("http://127.0.0.1:8000/api/chat", {
+            const res = await fetch(`${BASE_URL}/api/chat`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ 
