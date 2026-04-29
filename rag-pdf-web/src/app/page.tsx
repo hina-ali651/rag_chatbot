@@ -57,11 +57,7 @@ export default function Home() {
 
     const createNewSession = async () => {
         if (!session?.user?.email) return;
-<<<<<<< HEAD
         const res = await fetch(`${BASE_URL}/api/sessions`, {
-=======
-        const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/sessions`, {
->>>>>>> 6207e93bb500a9bea1cfbad03fda52b9719c973f
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({user_email: session.user.email, title: "New Chat"})
