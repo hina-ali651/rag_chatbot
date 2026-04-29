@@ -6,7 +6,7 @@
 
 ---
 
-## 🎥 De
+## 🎥 Demo
 [![Watch Demo](https://img.youtube.com/vi/SwshNk5FhVE/0.jpg)](https://youtu.be/SwshNk5FhVE)
 
 ---
